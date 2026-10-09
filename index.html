@@ -11,34 +11,41 @@
   <style>
     body { margin: 0; background: #121212; overflow: hidden; color: #fff; font-family: sans-serif; }
     #canvas-container { width: 100vw; height: 100vh; display: block; }
+    #ui-bar {
+      position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+      z-index: 10; display: flex; gap: 10px;
+    }
+    .btn {
+      background: #0288d1; color: #fff; border: none; padding: 10px 18px;
+      font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
     #status {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 14px; text-align: center;
-      background: rgba(0,0,0,0.7); padding: 12px 20px; border-radius: 8px;
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-size: 14px; text-align: center; background: rgba(0,0,0,0.8);
+      padding: 12px 20px; border-radius: 8px; pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <div id="status">⏳ Đang khởi tạo mô hình...</div>
+  <div id="ui-bar">
+    <button class="btn" onclick="document.getElementById('file-input').click()">📂 Chọn file STL để xem</button>
+    <input type="file" id="file-input" accept=".stl" style="display: none;">
+  </div>
+
+  <div id="status">💡 Bấm nút trên để chọn file STL hoặc kéo thả file vào đây</div>
   <div id="canvas-container"></div>
 
   <script>
     const tg = window.Telegram?.WebApp;
-    if (tg) {
-      tg.ready();
-      tg.expand();
-    }
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const fileUrl = urlParams.get('file');
+    if (tg) { tg.ready(); tg.expand(); }
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = new THREE.Color(0x181818);
 
-    const gridHelper = new THREE.GridHelper(200, 20, 0x444444, 0x222222);
-    gridHelper.position.y = -50;
-    scene.add(gridHelper);
+    const grid = new THREE.GridHelper(200, 20, 0x444444, 0x222222);
+    grid.position.y = -40;
+    scene.add(grid);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -48,57 +55,58 @@
 
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambientLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const d1 = new THREE.DirectionalLight(0xffffff, 0.9);
+    d1.position.set(100, 200, 100);
+    scene.add(d1);
+    const d2 = new THREE.DirectionalLight(0x90caf9, 0.5);
+    d2.position.set(-100, -100, -100);
+    scene.add(d2);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.9);
-    dirLight1.position.set(100, 200, 100);
-    scene.add(dirLight1);
+    let currentMesh = null;
+    const loader = new THREE.STLLoader();
 
-    const dirLight2 = new THREE.DirectionalLight(0x90caf9, 0.5);
-    dirLight2.position.set(-100, -100, -100);
-    scene.add(dirLight2);
+    function loadSTLBuffer(buffer) {
+      document.getElementById('status').innerText = '⏳ Đang hiển thị mô hình...';
+      try {
+        const geometry = loader.parse(buffer);
+        if (currentMesh) scene.remove(currentMesh);
 
-    if (fileUrl) {
-      const loader = new THREE.STLLoader();
-      document.getElementById('status').innerText = '⏳ Đang tải file 3D...';
-      
-      loader.load(
-        fileUrl,
-        function (geometry) {
-          document.getElementById('status').style.display = 'none';
-          geometry.center();
-          const material = new THREE.MeshStandardMaterial({
-            color: 0xcccccc,
-            roughness: 0.35,
-            metalness: 0.15
-          });
-          const mesh = new THREE.Mesh(geometry, material);
-          scene.add(mesh);
+        geometry.center();
+        const material = new THREE.MeshStandardMaterial({ color: 0x90caf9, roughness: 0.35, metalness: 0.15 });
+        currentMesh = new THREE.Mesh(geometry, material);
+        scene.add(currentMesh);
 
-          geometry.computeBoundingSphere();
-          const radius = geometry.boundingSphere.radius;
-          camera.position.set(radius * 1.5, radius * 1.5, radius * 2.0);
-          camera.lookAt(0, 0, 0);
-          controls.maxDistance = radius * 10;
-          controls.minDistance = radius * 0.2;
-          controls.update();
-        },
-        function (xhr) {
-          if (xhr.lengthComputable) {
-            const percent = Math.round((xhr.loaded / xhr.total) * 100);
-            document.getElementById('status').innerText = `⏳ Đang tải: ${percent}%`;
-          }
-        },
-        function (error) {
-          document.getElementById('status').innerText = '❌ Không thể tải hoặc định dạng STL không hợp lệ';
-        }
-      );
-    } else {
-      document.getElementById('status').innerText = '❌ Cần đường dẫn file (?file=...)';
+        geometry.computeBoundingSphere();
+        const r = geometry.boundingSphere.radius;
+        camera.position.set(r * 1.5, r * 1.5, r * 2.0);
+        camera.lookAt(0, 0, 0);
+        controls.update();
+
+        document.getElementById('status').style.display = 'none';
+      } catch (err) {
+        document.getElementById('status').innerText = '❌ Định dạng file STL không hợp lệ';
+      }
     }
+
+    document.getElementById('file-input').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) { loadSTLBuffer(evt.target.result); };
+      reader.readAsArrayBuffer(file);
+    });
+
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files.length > 0) {
+        const reader = new FileReader();
+        reader.onload = function(evt) { loadSTLBuffer(evt.target.result); };
+        reader.readAsArrayBuffer(e.dataTransfer.files[0]);
+      }
+    });
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
