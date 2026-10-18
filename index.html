@@ -1,125 +1,68 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>3D STL Viewer</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-  <style>
-    body { margin: 0; background: #121212; overflow: hidden; color: #fff; font-family: sans-serif; }
-    #canvas-container { width: 100vw; height: 100vh; display: block; }
-    #ui-bar {
-      position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
-      z-index: 10; display: flex; gap: 10px;
-    }
-    .btn {
-      background: #0288d1; color: #fff; border: none; padding: 10px 18px;
-      font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-    }
-    #status {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      font-size: 14px; text-align: center; background: rgba(0,0,0,0.8);
-      padding: 12px 20px; border-radius: 8px; pointer-events: none;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Thư viện Mô hình 3D</title>
+    <style>
+        body { background: #121212; color: #fff; font-family: sans-serif; margin: 0; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 15px; margin-top: 20px; }
+        .card { background: #1e1e1e; border: 1px solid #333; padding: 15px; border-radius: 8px; }
+        .card h4 { margin: 0 0 8px 0; word-break: break-all; }
+        .btn { display: inline-block; background: #007bff; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; margin-top: 10px; }
+        input { padding: 8px; width: 100%; max-width: 400px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; }
+    </style>
 </head>
 <body>
-  <div id="ui-bar">
-    <button class="btn" onclick="document.getElementById('file-input').click()">📂 Chọn file STL để xem</button>
-    <input type="file" id="file-input" accept=".stl" style="display: none;">
-  </div>
+    <div id="app">
+        <h2>📦 Thư viện Mô hình 3D</h2>
+        <input type="text" id="searchBox" placeholder="🔍 Tìm kiếm mô hình..." onkeyup="filterModels()">
+        <div id="modelGrid" class="grid">Đang tải danh sách thư viện...</div>
+    </div>
 
-  <div id="status">💡 Bấm nút trên để chọn file STL hoặc kéo thả file vào đây</div>
-  <div id="canvas-container"></div>
+    <script>
+        // Thay bằng URL Cloudflare Tunnel hiện tại của bạn
+        const TUNNEL_URL = "https://your-tunnel-url.trycloudflare.com";
 
-  <script>
-    const tg = window.Telegram?.WebApp;
-    if (tg) { tg.ready(); tg.expand(); }
+        async function loadGallery() {
+            try {
+                let res = await fetch(`${TUNNEL_URL}/models/index.json`);
+                let models = await res.json();
+                window.allModels = models;
+                renderGrid(models);
+            } catch (e) {
+                document.getElementById('modelGrid').innerHTML = "<p style='color:red;'>Không thể kết nối đến máy chủ Raspberry Pi hoặc tunnel đã đổi link!</p>";
+            }
+        }
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x181818);
+        function renderGrid(models) {
+            let grid = document.getElementById('modelGrid');
+            grid.innerHTML = "";
+            models.forEach(m => {
+                let card = document.createElement('div');
+                card.className = "card";
+                card.innerHTML = `
+                    <h4>${m.name}</h4>
+                    <p style="font-size: 12px; color: #aaa; margin: 0;">Dung lượng: ${m.size_mb} MB | ${m.date}</p>
+                    <a href="?file=${TUNNEL_URL}/models/${encodeURIComponent(m.name)}" class="btn">👁 Xem 3D</a>
+                `;
+                grid.appendChild(card);
+            });
+        }
 
-    const grid = new THREE.GridHelper(200, 20, 0x444444, 0x222222);
-    grid.position.y = -40;
-    scene.add(grid);
+        function filterModels() {
+            let keyword = document.getElementById('searchBox').value.toLowerCase();
+            let filtered = window.allModels.filter(m => m.name.toLowerCase().includes(keyword));
+            renderGrid(filtered);
+        }
 
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    document.getElementById('canvas-container').appendChild(renderer.domElement);
-
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const d1 = new THREE.DirectionalLight(0xffffff, 0.9);
-    d1.position.set(100, 200, 100);
-    scene.add(d1);
-    const d2 = new THREE.DirectionalLight(0x90caf9, 0.5);
-    d2.position.set(-100, -100, -100);
-    scene.add(d2);
-
-    let currentMesh = null;
-    const loader = new THREE.STLLoader();
-
-    function loadSTLBuffer(buffer) {
-      document.getElementById('status').innerText = '⏳ Đang hiển thị mô hình...';
-      try {
-        const geometry = loader.parse(buffer);
-        if (currentMesh) scene.remove(currentMesh);
-
-        geometry.center();
-        const material = new THREE.MeshStandardMaterial({ color: 0x90caf9, roughness: 0.35, metalness: 0.15 });
-        currentMesh = new THREE.Mesh(geometry, material);
-        scene.add(currentMesh);
-
-        geometry.computeBoundingSphere();
-        const r = geometry.boundingSphere.radius;
-        camera.position.set(r * 1.5, r * 1.5, r * 2.0);
-        camera.lookAt(0, 0, 0);
-        controls.update();
-
-        document.getElementById('status').style.display = 'none';
-      } catch (err) {
-        document.getElementById('status').innerText = '❌ Định dạng file STL không hợp lệ';
-      }
-    }
-
-    document.getElementById('file-input').addEventListener('change', function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(evt) { loadSTLBuffer(evt.target.result); };
-      reader.readAsArrayBuffer(file);
-    });
-
-    window.addEventListener('dragover', (e) => e.preventDefault());
-    window.addEventListener('drop', (e) => {
-      e.preventDefault();
-      if (e.dataTransfer.files.length > 0) {
-        const reader = new FileReader();
-        reader.onload = function(evt) { loadSTLBuffer(evt.target.result); };
-        reader.readAsArrayBuffer(e.dataTransfer.files[0]);
-      }
-    });
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
-  </script>
+        // Kiểm tra nếu có ?file= trên URL thì chuyển sang chế độ tích hợp Three.js xem 3D
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('file')) {
+            document.getElementById('app').innerHTML = "<h2>Đang tải mô hình 3D...</h2>";
+            // Code khởi tạo Three.js load file của bạn đặt ở đây
+        } else {
+            loadGallery();
+        }
+    </script>
 </body>
 </html>
